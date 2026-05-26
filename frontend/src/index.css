@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #09090b;
+  --color-surface: #18181b;
+  --color-surface-hover: #27272a;
+  --color-border: #3f3f46;
+  
+  --color-brand: #8b5cf6;
+  --color-brand-hover: #a78bfa;
+  --color-brand-muted: rgba(139, 92, 246, 0.15);
+  
+  --color-text: #f4f4f5;
+  --color-text-muted: #a1a1aa;
+}
+
+@layer base {
+  body {
+    @apply bg-background text-text antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer utilities {
+  .icon-btn {
+    @apply h-8 w-8 inline-flex items-center justify-center rounded-md border border-border bg-surface text-text-muted hover:border-brand hover:text-brand transition-all hover:shadow-[0_0_10px_var(--color-brand-muted)];
+  }
+
+  .text-icon-btn {
+    @apply h-8 px-3 inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-surface text-xs font-medium text-text-muted hover:border-brand hover:text-brand transition-all hover:shadow-[0_0_10px_var(--color-brand-muted)];
+  }
+
+  .glass-panel {
+    @apply bg-surface/80 backdrop-blur-md border border-border rounded-xl shadow-lg;
+  }
+  
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

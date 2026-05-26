@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Debug Tool</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1e1e1e; color: #d4d4d4; }
+        #log { background: #252526; padding: 10px; height: 400px; overflow-y: scroll; border: 1px solid #3e3e42; }
+        .error { color: #f48771; }
+        .success { color: #4ec9b0; }
+        .info { color: #9cdcfe; }
+        button { padding: 10px 20px; margin: 10px 5px 10px 0; background: #0e639c; color: white; border: none; cursor: pointer; }
+        button:hover { background: #1177bb; }
+        input { padding: 10px; width: 400px; background: #3c3c3c; color: #d4d4d4; border: 1px solid #3e3e42; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Debug Tool</h1>
+    <div>
+        <input type="text" id="sessionId" placeholder="Session ID" value="test-debug-session">
+        <input type="text" id="message" placeholder="Message" value="Create a simple hello.html file">
+        <button onclick="connect()">Connect & Send</button>
+        <button onclick="clearLog()">Clear Log</button>
+    </div>
+    <div id="log"></div>
+
+    <script>
+        let ws = null;
+        let messageCount = 0;
+
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `<div class="${type}">[${timestamp}] ${message}</div>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+            messageCount = 0;
+        }
+
+        function connect() {
+            const sessionId = document.getElementById('sessionId').value;
+            const message = document.getElementById('message').value;
+
+            if (ws) {
+                log('Closing existing connection...', 'info');
+                ws.close();
+            }
+
+            log('Connecting to ws://localhost:8001/api/agent/ws', 'info');
+            ws = new WebSocket('ws://localhost:8001/api/agent/ws');
+
+            ws.onopen = () => {
+                log('✓ WebSocket connected', 'success');
+                const payload = {
+                    session_id: sessionId,
+                    message: message,
+                    last_seq: 0
+                };
+                log('Sending: ' + JSON.stringify(payload), 'info');
+                ws.send(JSON.stringify(payload));
+            };
+
+            ws.onmessage = (event) => {
+                messageCount++;
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.type === 'ping') {
+                        log(`← PING (responding with PONG)`, 'info');
+                        ws.send(JSON.stringify({ type: 'pong', ts: data.ts }));
+                        return;
+                    }
+
+                    if (data.type === 'on_chat_model_stream' && data.chunk) {
+                        log(`← STREAM: ${data.chunk.substring(0, 50)}...`, 'success');
+                        return;
+                    }
+
+                    log(`← MESSAGE #${messageCount}: ${data.type} | node: ${data.node || 'N/A'}`, 'success');
+                    
+                    if (data.data) {
+                        const dataStr = JSON.stringify(data.data).substring(0, 100);
+                        log(`  Data: ${dataStr}...`, 'info');
+                    }
+                } catch (e) {
+                    log(`✗ Failed to parse message: ${e.message}`, 'error');
+                    log(`  Raw: ${event.data.substring(0, 200)}`, 'error');
+                }
+            };
+
+            ws.onerror = (error) => {
+                log(`✗ WebSocket error: ${error}`, 'error');
+                console.error('WebSocket error:', error);
+            };
+
+            ws.onclose = (event) => {
+                log(`✗ WebSocket closed: code=${event.code}, reason=${event.reason || 'none'}`, 'error');
+                log(`  Total messages received: ${messageCount}`, 'info');
+                
+                if (event.code === 1000) {
+                    log('  (Normal closure)', 'info');
+                } else if (event.code === 1001) {
+                    log('  (Going away - timeout or server shutdown)', 'error');
+                } else if (event.code === 1006) {
+                    log('  (Abnormal closure - connection lost)', 'error');
+                }
+            };
+        }
+
+        // Auto-connect on load for quick testing
+        window.onload = () => {
+            log('Ready. Click "Connect & Send" to test.', 'info');
+        };
+    </script>
+</body>
+</html>
