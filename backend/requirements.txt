@@ -27,6 +27,7 @@ ruff
 # ── Phase 1: Token & Context Management ──
 tiktoken
 # ── Phase 4: SRS Document Processing & RAG ──
+markitdown[pdf]
 pdfplumber
 sentence-transformers
 chromadb

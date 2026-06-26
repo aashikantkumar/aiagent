@@ -410,6 +410,38 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                                     </div>
                                 </div>
                             </div>
+                            
+                            <h3 className="text-sm font-semibold text-text mt-6">Role-Based Model Routing</h3>
+                            <div className="space-y-4">
+                                {[
+                                    { key: 'role_profile_planner', label: 'Planner Model', desc: 'Used for architecture and detail planning.' },
+                                    { key: 'role_profile_backend', label: 'Backend Subagent Model', desc: 'Used for backend API/service implementation.' },
+                                    { key: 'role_profile_frontend', label: 'Frontend Subagent Model', desc: 'Used for UI component implementation.' },
+                                    { key: 'role_profile_validator', label: 'Judge/Validator Model', desc: 'Used for reviewing code and plans.' },
+                                ].map(role => (
+                                    <div key={role.key} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 border border-border bg-surface-hover/20 rounded-lg gap-2">
+                                        <div className="space-y-0.5">
+                                            <h4 className="text-xs font-semibold text-text">{role.label}</h4>
+                                            <p className="text-[11px] text-text-muted">{role.desc}</p>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <select
+                                                value={generalSettings[role.key] || ''}
+                                                onChange={e => handleUpdateSetting(role.key, e.target.value || null)}
+                                                className="w-48 bg-surface border border-border rounded px-2 py-1 text-xs text-text focus:border-brand outline-none"
+                                            >
+                                                <option value="">Use Default Profile</option>
+                                                {profiles.map(p => (
+                                                    <option key={p.id} value={p.id}>
+                                                        {p.provider.toUpperCase()}: {p.model}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            {actionLoading === role.key && <Loader2 size={14} className="animate-spin text-brand" />}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     )}
                 </div>
