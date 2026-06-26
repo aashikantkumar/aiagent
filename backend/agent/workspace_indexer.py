@@ -521,3 +521,83 @@ class WorkspaceIndexer:
             parts.append(f"\n  Directory Tree:\n" + "\n".join(f"    {l}" for l in tree_lines))
 
         return "\n".join(parts)
+
+    def get_ranked_context(
+        self,
+        idx: WorkspaceIndex,
+        plan_files: List[str] = None,
+        error_file: str = None,
+        query: str = None,
+        max_tokens: int = 4000
+    ) -> str:
+        """
+        Collects, ranks, and fits workspace files into a token budget.
+        
+        Ranks files by relevance:
+        1. Error file (the file that caused the last compilation/runtime crash)
+        2. Plan files (files the agent is scheduled to work on)
+        3. Entry points / Key files (app.js, server.py, etc.)
+        4. Query-relevant files (if they match keywords in user requests)
+        
+        Token budget manager ensures we only embed file contents up to max_tokens limit.
+        """
+        summary = self.summarize(idx)
+        ranked_files = []
+        
+        clean_plan_files = [p.strip().lstrip("/") for p in (plan_files or [])]
+        clean_error_file = error_file.strip().lstrip("/") if error_file else None
+        if clean_error_file and "workspace/" in clean_error_file:
+            clean_error_file = clean_error_file.split("workspace/", 1)[-1]
+            
+        for file_info in idx.files:
+            rel_path = file_info.path
+            score = 0
+            
+            if clean_error_file and (clean_error_file in rel_path or rel_path in clean_error_file):
+                score += 1000
+            if any(pf in rel_path or rel_path in pf for pf in clean_plan_files):
+                score += 500
+            if rel_path in idx.entry_points:
+                score += 200
+            if file_info.is_key_file:
+                score += 100
+            if query:
+                keywords = [k.lower() for k in re.findall(r"\w+", query) if len(k) > 3]
+                for kw in keywords:
+                    if kw in rel_path.lower() or kw in file_info.file_type.lower():
+                        score += 50
+                        
+            if score > 0:
+                ranked_files.append((score, file_info))
+                
+        ranked_files.sort(key=lambda x: x[0], reverse=True)
+        
+        budget_chars = max_tokens * 4
+        current_chars = len(summary)
+        embedded_files = []
+        
+        for score, file_info in ranked_files:
+            filepath = os.path.join(self.root, file_info.path)
+            if not os.path.exists(filepath):
+                continue
+            if file_info.size > 100_000:
+                continue
+            try:
+                with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+            except Exception:
+                continue
+                
+            file_block = f"\n\n=========================================\nFILE: {file_info.path}\n=========================================\n{content}"
+            block_len = len(file_block)
+            
+            if current_chars + block_len <= budget_chars:
+                embedded_files.append(file_block)
+                current_chars += block_len
+                
+        parts = [summary]
+        if embedded_files:
+            parts.append("\n\nRELEVANT FILE CONTENTS (EMBEDDED CONTEXT):")
+            parts.extend(embedded_files)
+            
+        return "\n".join(parts)

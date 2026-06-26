@@ -121,3 +121,65 @@ class ConversationService:
             )
             conn.commit()
         return self.get_conversation(conversation_id)
+
+    def _ensure_events_table(self, conn: psycopg.Connection) -> None:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS session_events (
+                id SERIAL PRIMARY KEY,
+                session_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                event_type TEXT NOT NULL,
+                payload JSONB NOT NULL,
+                seq INT NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """
+        )
+        conn.commit()
+
+    def add_event(self, session_id: str, event_type: str, payload: dict, seq: int) -> None:
+        import json
+        with self._connect() as conn:
+            self._ensure_events_table(conn)
+            # The session may come from a client that reconnected after a DB
+            # reset (or generated its own UUID) — create the conversation row
+            # if missing so the FK on session_events never rejects the event.
+            conn.execute(
+                """
+                INSERT INTO conversations (id, status)
+                VALUES (%s, 'active')
+                ON CONFLICT (id) DO NOTHING
+                """,
+                (session_id,),
+            )
+            conn.execute(
+                """
+                INSERT INTO session_events (session_id, event_type, payload, seq)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (session_id, event_type, json.dumps(payload), seq),
+            )
+            conn.commit()
+
+    def get_events(self, session_id: str) -> list[dict]:
+        with self._connect() as conn:
+            self._ensure_events_table(conn)
+            rows = conn.execute(
+                """
+                SELECT payload, seq FROM session_events
+                WHERE session_id = %s
+                ORDER BY seq ASC
+                """,
+                (session_id,),
+            ).fetchall()
+        
+        events = []
+        for row in rows:
+            payload = row[0]
+            if isinstance(payload, str):
+                import json
+                payload = json.loads(payload)
+            payload["seq"] = row[1]
+            events.append(payload)
+        return events
+

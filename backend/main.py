@@ -18,6 +18,7 @@ from routes.settings import router as settings_router
 from routes.conversations import router as conversations_router
 
 settings = get_settings()
+settings.export_to_env()
 logger = get_logger(__name__)
 
 

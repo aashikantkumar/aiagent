@@ -1,10 +1,98 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAgentStore } from '../store/agentStore';
-import { Send, Terminal, Loader2, Square } from 'lucide-react';
+import { Send, Terminal, Loader2, Square, Play, FileText, PlayCircle, Search, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react';
 import { useAgentStream } from '../hooks/useAgentStream';
 import { FileUpload } from './FileUpload';
 import { ErrorAnalysisPanel } from './ErrorAnalysisPanel';
 import { PlanTracker } from './PlanTracker';
+
+interface ActionCardProps {
+    type: 'write' | 'run' | 'search' | 'finish';
+    title: string;
+    detail?: string;
+    content?: string;
+}
+
+const ActionCard: React.FC<ActionCardProps> = ({ type, title, detail, content }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    
+    const iconMap = {
+        write: <FileText size={16} className="text-cyan-400" />,
+        run: <PlayCircle size={16} className="text-green-400" />,
+        search: <Search size={16} className="text-purple-400" />,
+        finish: <CheckCircle2 size={16} className="text-emerald-400" />,
+    };
+
+    return (
+        <div className="border border-border bg-[#181920]/80 rounded-lg overflow-hidden my-2 shadow-sm w-full max-w-full">
+            <button
+                type="button"
+                onClick={() => setIsOpen(!isOpen)}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-[#1f202a] transition-all text-xs font-medium"
+            >
+                {iconMap[type]}
+                <span className="flex-1 text-slate-200 truncate">{title}</span>
+                {detail && <span className="text-[10px] text-slate-400 bg-slate-800/60 px-1.5 py-0.5 rounded border border-slate-700 shrink-0">{detail}</span>}
+                {content && (
+                    isOpen ? <ChevronUp size={14} className="text-slate-400 shrink-0" /> : <ChevronDown size={14} className="text-slate-400 shrink-0" />
+                )}
+            </button>
+            {isOpen && content && (
+                <div className="border-t border-border bg-black/30 p-2.5 font-mono text-[11px] leading-relaxed max-h-[250px] overflow-y-auto text-slate-300">
+                    <pre className="whitespace-pre-wrap">{content.trim()}</pre>
+                </div>
+            )}
+        </div>
+    );
+};
+
+const parseMessageContent = (text: string) => {
+    const regex = /(<think>[\s\S]*?<\/think>|<write\s+path=['"]([^'"]+)['"]>([\s\S]*?)<\/write>|<run>([\s\S]*?)<\/run>|<search>([\s\S]*?)<\/search>|<finish>([\s\S]*?)<\/finish>)/g;
+    
+    const parts = [];
+    let lastIndex = 0;
+    let match;
+    
+    while ((match = regex.exec(text)) !== null) {
+        if (match.index > lastIndex) {
+            parts.push({ type: 'text', content: text.substring(lastIndex, match.index) });
+        }
+        
+        const fullMatch = match[0];
+        if (fullMatch.startsWith('<think>')) {
+            parts.push({ type: 'think', content: fullMatch.replace(/<\/?think>/g, '') });
+        } else if (fullMatch.startsWith('<write')) {
+            parts.push({
+                type: 'write',
+                path: match[2],
+                content: match[3],
+            });
+        } else if (fullMatch.startsWith('<run>')) {
+            parts.push({
+                type: 'run',
+                content: match[4],
+            });
+        } else if (fullMatch.startsWith('<search>')) {
+            parts.push({
+                type: 'search',
+                content: match[5],
+            });
+        } else if (fullMatch.startsWith('<finish>')) {
+            parts.push({
+                type: 'finish',
+                content: match[6],
+            });
+        }
+        
+        lastIndex = regex.lastIndex;
+    }
+    
+    if (lastIndex < text.length) {
+        parts.push({ type: 'text', content: text.substring(lastIndex) });
+    }
+    
+    return parts;
+};
 
 export const Chat: React.FC = () => {
     const {
@@ -14,8 +102,11 @@ export const Chat: React.FC = () => {
         status,
         connectionState,
         error,
+        chatModeBySession,
+        setChatMode,
     } = useAgentStore();
-    const { send, stop } = useAgentStream();
+    const chatMode = chatModeBySession[activeSessionId] || 'build';
+    const { send, resume, stop } = useAgentStream();
     const [input, setInput] = useState('');
     const endRef = useRef<HTMLDivElement>(null);
     const messages = messagesBySession[activeSessionId] || [];
@@ -30,7 +121,6 @@ export const Chat: React.FC = () => {
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (input.trim()) {
-            // If there's an uploaded SRS document, prepend its text to the message
             const srsText = useAgentStore.getState().consumeSrsText(activeSessionId);
             const fullMessage = srsText
                 ? `[SRS DOCUMENT]\n${srsText}\n\n[USER INSTRUCTION]\n${input.trim()}`
@@ -79,19 +169,71 @@ export const Chat: React.FC = () => {
                         <div className={`max-w-[85%] rounded-lg p-3 text-sm shadow-md ${
                             msg.role === 'user' 
                                 ? 'bg-brand text-white rounded-br-none' 
-                                : 'bg-surface-hover border border-border text-text rounded-bl-none'
+                                : msg.role === 'system'
+                                ? 'bg-amber-950/50 border border-amber-700/50 text-amber-100 rounded-bl-none w-full'
+                                : 'bg-surface-hover border border-border text-text rounded-bl-none w-full'
                         }`}>
-                            {msg.role === 'agent' ? (
-                                <pre className="whitespace-pre-wrap font-sans">
-                                    {/* Naively render think tags as dimmed */}
-                                    {msg.content.split(/(<think>[\s\S]*?<\/think>)/g).map((part, idx) => {
-                                        if (part.startsWith('<think>')) {
-                                            return <div key={idx} className="text-gray-500 italic text-xs my-2 pl-2 border-l-2 border-gray-700 bg-black/20 p-2 rounded">{part.replace(/<\/?think>/g, '')}</div>;
+                            {msg.role === 'system' ? (
+                                <div className="space-y-1 w-full whitespace-pre-wrap font-sans">
+                                    {msg.content}
+                                </div>
+                            ) : msg.role === 'agent' ? (
+                                <div className="space-y-1 w-full">
+                                    {parseMessageContent(msg.content).map((part, idx) => {
+                                        if (part.type === 'think') {
+                                            return (
+                                                <div key={idx} className="text-gray-500 italic text-xs my-2 pl-2 border-l-2 border-gray-700 bg-black/20 p-2 rounded">
+                                                    {part.content}
+                                                </div>
+                                            );
                                         }
-                                        // Colorize other tags if needed, or just render text
-                                        return <span key={idx}>{part}</span>;
+                                        if (part.type === 'write') {
+                                            return (
+                                                <ActionCard
+                                                    key={idx}
+                                                    type="write"
+                                                    title={`Write ${part.path}`}
+                                                    detail="File Action"
+                                                    content={part.content}
+                                                />
+                                            );
+                                        }
+                                        if (part.type === 'run') {
+                                            return (
+                                                <ActionCard
+                                                    key={idx}
+                                                    type="run"
+                                                    title={`Run: ${part.content.trim()}`}
+                                                    detail="Shell Command"
+                                                    content={part.content}
+                                                />
+                                            );
+                                        }
+                                        if (part.type === 'search') {
+                                            return (
+                                                <ActionCard
+                                                    key={idx}
+                                                    type="search"
+                                                    title={`Search: ${part.content.trim()}`}
+                                                    detail="Web Search"
+                                                    content={part.content}
+                                                />
+                                            );
+                                        }
+                                        if (part.type === 'finish') {
+                                            return (
+                                                <ActionCard
+                                                    key={idx}
+                                                    type="finish"
+                                                    title="Task Finished"
+                                                    detail="Complete"
+                                                    content={part.content}
+                                                />
+                                            );
+                                        }
+                                        return <span key={idx} className="whitespace-pre-wrap font-sans">{part.content}</span>;
                                     })}
-                                </pre>
+                                </div>
                             ) : (
                                 <span>{msg.content}</span>
                             )}
@@ -102,33 +244,71 @@ export const Chat: React.FC = () => {
             </div>
 
             <form onSubmit={handleSubmit} className="p-3 border-t border-border bg-[#1a1b22] space-y-2">
-                <FileUpload />
+                <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center bg-surface border border-border rounded-lg p-0.5 text-[11px]">
+                        <button
+                            type="button"
+                            onClick={() => setChatMode('build', activeSessionId)}
+                            className={`px-2.5 py-1 rounded transition-all font-semibold ${
+                                chatMode === 'build'
+                                    ? 'bg-brand text-white shadow-sm'
+                                    : 'text-text-muted hover:text-text hover:bg-surface-hover'
+                            }`}
+                        >
+                            Build
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setChatMode('discuss', activeSessionId)}
+                            className={`px-2.5 py-1 rounded transition-all font-semibold ${
+                                chatMode === 'discuss'
+                                    ? 'bg-brand text-white shadow-sm'
+                                    : 'text-text-muted hover:text-text hover:bg-surface-hover'
+                            }`}
+                        >
+                            Discuss
+                        </button>
+                    </div>
+                    <FileUpload />
+                </div>
                 <ErrorAnalysisPanel />
                 <div className="relative flex items-center">
                     <input
                         type="text"
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
-                        placeholder="Describe your app..."
+                        placeholder={chatMode === 'discuss' ? "Ask a question about the project (Discuss)..." : "Describe what to build or fix..."}
                         className="w-full bg-surface border border-border rounded-lg pl-4 pr-12 py-3 text-sm focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand text-text transition-all"
                     />
                     {isRunning ? (
                         <button 
                             type="button" 
                             onClick={stop}
-                            title="Stop Generation"
+                            title="Stop Agent"
                             className="absolute right-2 p-2 bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors"
                         >
                             <Square size={16} />
                         </button>
                     ) : (
-                        <button 
-                            type="submit" 
-                            disabled={!input.trim() || connectionState === 'connecting'}
-                            className="absolute right-2 p-2 bg-brand hover:bg-brand-hover text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                        >
-                            <Send size={16} />
-                        </button>
+                        <div className="absolute right-2 flex items-center gap-1.5">
+                            {messages.length > 0 && (
+                                <button 
+                                    type="button" 
+                                    onClick={resume}
+                                    title="Resume Agent"
+                                    className="p-2 bg-green-600 hover:bg-green-700 text-white rounded-md transition-colors flex items-center justify-center"
+                                >
+                                    <Play size={16} fill="currentColor" />
+                                </button>
+                            )}
+                            <button 
+                                type="submit" 
+                                disabled={!input.trim() || connectionState === 'connecting'}
+                                className="p-2 bg-brand hover:bg-brand-hover text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                                <Send size={16} />
+                            </button>
+                        </div>
                     )}
                 </div>
             </form>

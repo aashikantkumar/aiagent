@@ -77,6 +77,12 @@ class Settings(BaseSettings):
     RAG_ENABLED: bool = True
     RAG_TOP_K: int = 5
 
+    # ── LangSmith Observability ─────────────────────────────────────────
+    LANGCHAIN_TRACING_V2: bool = False
+    LANGCHAIN_API_KEY: Optional[str] = None
+    LANGCHAIN_PROJECT: str = "ai-agent-builder"
+    LANGCHAIN_ENDPOINT: str = "https://api.smith.langchain.com"
+
     # ── Context Management ─────────────────────────────────────────────
     DEFAULT_CONTEXT_LIMIT: int = 8192  # Override per-model limits if needed
     CONTEXT_PRUNE_KEEP_LAST: int = 10  # Keep last N messages when pruning
@@ -85,7 +91,7 @@ class Settings(BaseSettings):
     SANDBOX_IMAGE: str = "agent-sandbox:latest"
     SANDBOX_MEM_LIMIT: str = "512m"
     SANDBOX_CPU_QUOTA: int = 50000
-    SANDBOX_TIMEOUT: int = 30  # seconds per command
+    SANDBOX_TIMEOUT: int = 300  # seconds per command
     SANDBOX_CLEANUP_INTERVAL: int = 3600  # 1 hour
 
     def get_groq_keys(self) -> list[str]:
@@ -135,6 +141,17 @@ class Settings(BaseSettings):
                 keys.append(single)
 
         return keys
+
+    def export_to_env(self) -> None:
+        """Export LangSmith configuration parameters to os.environ so they are picked up by LangChain/LangGraph."""
+        import logging
+        logger = logging.getLogger("core.config")
+        if self.LANGCHAIN_TRACING_V2 and self.LANGCHAIN_API_KEY:
+            os.environ["LANGCHAIN_TRACING_V2"] = "true"
+            os.environ["LANGCHAIN_API_KEY"] = self.LANGCHAIN_API_KEY
+            os.environ["LANGCHAIN_PROJECT"] = self.LANGCHAIN_PROJECT
+            os.environ["LANGCHAIN_ENDPOINT"] = self.LANGCHAIN_ENDPOINT
+            logger.info(f"LangSmith tracing enabled for project: {self.LANGCHAIN_PROJECT}")
 
     class Config:
         env_file = ".env"
